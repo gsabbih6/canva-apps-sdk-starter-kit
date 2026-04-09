@@ -7,7 +7,7 @@ import QRCode from 'qrcode';
 import * as styles from "../../../styles/components.css";
 
 // Production XRPay API
-const API_BASE_URL = 'https://xrpay.app/api'; 
+const API_BASE_URL = 'https://xrpay.xbitinnovations.com/api'; 
 
 export const App = () => {
   const isSupported = useFeatureSupport();
