@@ -1,19 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { AppUiProvider } from '@canva/app-ui-kit';
+import { 
+  Button, 
+  FormField, 
+  TextInput, 
+  Rows, 
+  Text, 
+  Title, 
+  Tabs, 
+  TabList, 
+  Tab, 
+  TabPanels, 
+  TabPanel
+} from '@canva/app-ui-kit';
 import { addElementAtCursor, addElementAtPoint } from "@canva/design";
 import { useFeatureSupport } from "@canva/app-hooks";
-import { QrCode, AlertCircle, CheckCircle2, Wallet, DollarSign, Link as LinkIcon, Key, LogOut, FileText, User, Mail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Wallet, DollarSign, Link as LinkIcon, Key, FileText, User, Mail } from 'lucide-react';
 import QRCode from 'qrcode';
 import * as styles from "../../../styles/components.css";
+import { FormattedMessage, useIntl } from 'react-intl';
 
 // Production XRPay API
 const API_BASE_URL = 'https://xrpay.xbitinnovations.com/api'; 
+
+interface MerchantData {
+  name: string;
+  currency: string;
+  fiatCurrency?: string;
+  settlementAddress?: string;
+}
 
 export const App = () => {
   const isSupported = useFeatureSupport();
   const addElement = [addElementAtPoint, addElementAtCursor].find((fn) =>
     isSupported(fn),
   );
+
+  const intl = useIntl();
 
   // Core State
   const [activeTab, setActiveTab] = useState<'guest' | 'connected'>('guest');
@@ -26,7 +48,7 @@ export const App = () => {
   
   // Connection State
   const [isConnected, setIsConnected] = useState(false);
-  const [merchantData, setMerchantData] = useState<any>(null);
+  const [merchantData, setMerchantData] = useState<MerchantData | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
   // Status State
@@ -35,15 +57,7 @@ export const App = () => {
   const [success, setSuccess] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<string | null>(null);
 
-  // Restore saved connection
-  useEffect(() => {
-    const savedKey = localStorage.getItem('xrpay_integration_token');
-    if (savedKey) {
-      setIntegrationKey(savedKey);
-      setActiveTab('connected');
-      handleConnect(savedKey);
-    }
-  }, []);
+
 
   const handleConnect = async (tokenOverride?: string) => {
     const token = tokenOverride || integrationKey;
@@ -66,17 +80,33 @@ export const App = () => {
         setMerchantData(data.merchant);
         localStorage.setItem('xrpay_integration_token', token);
       } else {
-        setError(data.error || 'Failed to connect. Check your Integration Key.');
+        setError(data.error || intl.formatMessage({
+          defaultMessage: 'Failed to connect. Check your Integration Key.',
+          description: 'Error message when integration key connection fails'
+        }));
         setIsConnected(false);
         setMerchantData(null);
         localStorage.removeItem('xrpay_integration_token');
       }
-    } catch (e) {
-      setError('Cannot reach XRPay. Check your network connection.');
+    } catch {
+      setError(intl.formatMessage({
+        defaultMessage: 'Cannot reach XRPay. Check your network connection.',
+        description: 'Error message when backend is unreachable'
+      }));
     } finally {
       setIsConnecting(false);
     }
   };
+
+  // Restore saved connection
+  useEffect(() => {
+    const savedKey = localStorage.getItem('xrpay_integration_token');
+    if (savedKey) {
+      setIntegrationKey(savedKey);
+      setActiveTab('connected');
+      handleConnect(savedKey);
+    }
+  }, []);
 
   const handleDisconnect = () => {
     setIsConnected(false);
@@ -141,7 +171,10 @@ export const App = () => {
     setLastInvoice(null);
 
     if (!addElement) {
-      setError('Adding elements is not supported in this view.');
+      setError(intl.formatMessage({
+        defaultMessage: 'Adding elements is not supported in this view.',
+        description: 'Error message when addElement is not available'
+      }));
       return;
     }
 
@@ -153,22 +186,38 @@ export const App = () => {
       if (activeTab === 'guest') {
         // GUEST MODE: Offline Xaman link
         if (!address || !address.startsWith('r')) {
-          throw new Error('Valid XRP destination address is required.');
+          throw new Error(intl.formatMessage({
+            defaultMessage: 'Valid XRP destination address is required.',
+            description: 'Validation error for XRP destination address'
+          }));
         }
         finalUri = `https://xaman.app/detect/request:${address}`;
         if (amount && !isNaN(Number(amount))) finalUri += `?amount=${amount}`;
       } else {
         // PRO SYNC: API call creates Invoice + Transaction
-        if (!isConnected) throw new Error('Not connected to XRPay.');
-        if (!amount) throw new Error('Amount is required for tracked invoices.');
+        if (!isConnected) {
+          throw new Error(intl.formatMessage({
+            defaultMessage: 'Not connected to XRPay.',
+            description: 'Validation error when not connected to dashboard'
+          }));
+        }
+        if (!amount) {
+          throw new Error(intl.formatMessage({
+            defaultMessage: 'Amount is required for tracked invoices.',
+            description: 'Validation error when amount is empty in pro sync'
+          }));
+        }
         
         const res = await fetch(`${API_BASE_URL}/canva/generate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             integrationToken: integrationKey,
-            amount: amount,
-            label: invoiceLabel || "Canva Design Invoice",
+            amount,
+            label: invoiceLabel || intl.formatMessage({
+              defaultMessage: 'Canva Design Invoice',
+              description: 'Default label for invoices generated from Canva'
+            }),
             customerName: customerName || undefined,
             customerEmail: customerEmail || undefined,
           })
@@ -203,220 +252,335 @@ export const App = () => {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 4000);
       
-    } catch (e: any) {
-      setError(e.message || 'Failed to generate QR Code');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : intl.formatMessage({
+        defaultMessage: 'Failed to generate QR Code',
+        description: 'Default fallback error for QR generation failure'
+      });
+      setError(errMsg);
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const amountLabel = activeTab === 'guest'
+    ? intl.formatMessage({
+        defaultMessage: 'Amount (Optional)',
+        description: 'Label for optional amount field in guest mode'
+      })
+    : intl.formatMessage(
+        {
+          defaultMessage: 'Amount ({currency})',
+          description: 'Label for amount field with currency symbol in pro mode'
+        },
+        { currency: merchantData?.fiatCurrency || 'USD' }
+      );
+
   return (
-    <AppUiProvider>
-      <div className={styles.scrollContainer} style={{ padding: '24px 20px', backgroundColor: 'var(--color-surface)', height: '100vh' }}>
-        
+    <div className={styles.scrollContainer} style={{ padding: '24px 20px', backgroundColor: 'var(--color-surface)', height: '100vh' }}>
+      <Rows spacing="3u">
         {/* Header */}
-        <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 600, margin: '0 0 6px 0', lineHeight: 1.3, color: 'var(--color-text-main)' }}>XRPay</h1>
-          <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', margin: 0 }}>
-            Generate instant XRP payment codes.
-          </p>
-        </div>
+        <Rows spacing="0.5u">
+          <Title size="medium">
+            <FormattedMessage
+              defaultMessage="XRPay"
+              description="Application title"
+            />
+          </Title>
+          <Text tone="secondary" size="small">
+            <FormattedMessage
+              defaultMessage="Generate instant XRP payment codes."
+              description="Application description subtext"
+            />
+          </Text>
+        </Rows>
 
         {/* Tab Navigation */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', backgroundColor: '#F1F5F9', padding: '4px', borderRadius: '8px' }}>
-          <button 
-            onClick={() => { setActiveTab('guest'); setError(''); }}
-            style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-              backgroundColor: activeTab === 'guest' ? 'white' : 'transparent',
-              boxShadow: activeTab === 'guest' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-              color: activeTab === 'guest' ? '#0F172A' : '#64748B'
-            }}>
-            Quick Code
-          </button>
-          <button 
-            onClick={() => { setActiveTab('connected'); setError(''); }}
-            style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-              backgroundColor: activeTab === 'connected' ? 'white' : 'transparent',
-              boxShadow: activeTab === 'connected' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-              color: activeTab === 'connected' ? '#0072FF' : '#64748B',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
-            }}>
-            <LinkIcon size={14} /> Pro Sync
-          </button>
-        </div>
-
-        {/* Dynamic Content Views */}
-        {activeTab === 'guest' ? (
-          // --- GUEST VIEW ---
-          <form id="generateForm" onSubmit={handleGenerate} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-main)' }}>Destination Address</label>
-                <div style={{ position: 'relative' }}>
-                  <Wallet size={16} color="var(--color-text-muted)" style={{ position: 'absolute', top: '12px', left: '12px' }} />
-                  <input
-                    type="text"
-                    className={styles['input-field']}
-                    placeholder="rXRPay..."
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px 10px 36px', fontSize: '14px', borderRadius: '8px', border: '1px solid var(--color-border)' }}
-                  />
-                </div>
-              </div>
-          </form>
-        ) : (
-          // --- PRO SYNC VIEW ---
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {!isConnected ? (
-              // Connection Form
-              <div style={{ backgroundColor: '#F8FAFC', padding: '16px', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
-                <h3 style={{ fontSize: '14px', margin: '0 0 8px 0', color: '#0F172A' }}>Link your XRPay Dashboard</h3>
-                <p style={{ fontSize: '12px', color: '#64748B', margin: '0 0 16px 0', lineHeight: 1.4 }}>
-                  Paste your <strong>Integration Key</strong> from <em>Dashboard → Integrations → Canva</em> to create tracked invoices.
-                </p>
-                <div style={{ position: 'relative', marginBottom: '12px' }}>
-                  <Key size={16} color="var(--color-text-muted)" style={{ position: 'absolute', top: '12px', left: '12px' }} />
-                  <input
-                    type="password"
-                    placeholder="Paste Integration Key"
-                    value={integrationKey}
-                    onChange={(e) => setIntegrationKey(e.target.value)}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px 10px 36px', fontSize: '13px', borderRadius: '6px', border: '1px solid var(--color-border)' }}
-                  />
-                </div>
-                <button 
-                  onClick={() => handleConnect()}
-                  disabled={!integrationKey || isConnecting}
-                  style={{ width: '100%', padding: '10px', borderRadius: '6px', backgroundColor: '#0072FF', color: 'white', border: 'none', fontWeight: 500, cursor: 'pointer', opacity: (!integrationKey || isConnecting) ? 0.6 : 1 }}
-                >
-                  {isConnecting ? "Connecting..." : "Connect"}
-                </button>
-              </div>
-            ) : (
-              // Connected Status
-              <>
-                <div style={{ backgroundColor: '#EFF6FF', padding: '16px', borderRadius: '12px', border: '1px solid #BFDBFE' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <CheckCircle2 size={16} color="#2563EB" />
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: '#1E3A8A' }}>Connected</span>
-                     </div>
-                     <button onClick={handleDisconnect} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                       <LogOut size={14} /> Disconnect
-                     </button>
-                  </div>
-                  <p style={{ fontSize: '14px', margin: 0, fontWeight: 600, color: '#1E40AF' }}>{merchantData?.name}</p>
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                    <span style={{ fontSize: '11px', color: '#3B82F6', backgroundColor: '#DBEAFE', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
-                      {merchantData?.currency}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#64748B', fontFamily: 'monospace', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '180px' }}>
-                      {merchantData?.settlementAddress}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Optional Invoice Details */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ position: 'relative' }}>
-                    <FileText size={14} color="var(--color-text-muted)" style={{ position: 'absolute', top: '11px', left: '10px' }} />
-                    <input
-                      type="text"
-                      placeholder="Invoice label (optional)"
-                      value={invoiceLabel}
-                      onChange={(e) => setInvoiceLabel(e.target.value)}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px 9px 32px', fontSize: '13px', borderRadius: '6px', border: '1px solid #E2E8F0' }}
+        <Tabs activeId={activeTab} onSelect={(id) => { setActiveTab(id as 'guest' | 'connected'); setError(''); }}>
+          <TabList align="stretch" spacing="1u">
+            <Tab id="guest">
+              <FormattedMessage
+                defaultMessage="Quick Code"
+                description="Tab label for guest mode"
+              />
+            </Tab>
+            <Tab id="connected" start={<LinkIcon size={14} />}>
+              <FormattedMessage
+                defaultMessage="Pro Sync"
+                description="Tab label for merchant sync mode"
+              />
+            </Tab>
+          </TabList>
+          
+          <TabPanels>
+            <TabPanel id="guest">
+              <div style={{ marginTop: '20px' }}>
+                <FormField
+                  label={intl.formatMessage({
+                    defaultMessage: 'Destination Address',
+                    description: 'Label for XRP target wallet address'
+                  })}
+                  value={address}
+                  control={(props) => (
+                    <TextInput
+                      {...props}
+                      start={<Wallet size={16} />}
+                      placeholder={intl.formatMessage({
+                        defaultMessage: 'rXRPay...',
+                        description: 'Placeholder for XRP wallet address input'
+                      })}
+                      value={address}
+                      onChange={(val) => setAddress(val)}
                     />
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                      <User size={14} color="var(--color-text-muted)" style={{ position: 'absolute', top: '11px', left: '10px' }} />
-                      <input
-                        type="text"
-                        placeholder="Customer name"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px 9px 32px', fontSize: '13px', borderRadius: '6px', border: '1px solid #E2E8F0' }}
-                      />
-                    </div>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                      <Mail size={14} color="var(--color-text-muted)" style={{ position: 'absolute', top: '11px', left: '10px' }} />
-                      <input
-                        type="text"
-                        placeholder="Email"
-                        value={customerEmail}
-                        onChange={(e) => setCustomerEmail(e.target.value)}
-                        style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px 9px 32px', fontSize: '13px', borderRadius: '6px', border: '1px solid #E2E8F0' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* SHARED AMOUNT + SUBMIT */}
-        { (activeTab === 'guest' || isConnected) && (
-          <form id="generateForm" onSubmit={handleGenerate} style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-main)' }}>
-                Amount <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>{activeTab === 'guest' ? '(Optional)' : `(${merchantData?.fiatCurrency || 'USD'})`}</span>
-              </label>
-              <div style={{ position: 'relative' }}>
-                 <DollarSign size={16} color="var(--color-text-muted)" style={{ position: 'absolute', top: '12px', left: '12px' }} />
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  className={styles['input-field']}
-                  placeholder={isConnected ? "Invoice amount" : "100.00"}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px 10px 36px', fontSize: '14px', borderRadius: '8px', border: '1px solid var(--color-border)' }}
+                  )}
                 />
               </div>
-            </div>
+            </TabPanel>
+            
+            <TabPanel id="connected">
+              <div style={{ marginTop: '20px' }}>
+                {!isConnected ? (
+                  <Rows spacing="2u">
+                    <Rows spacing="1u">
+                      <Title size="xsmall">
+                        <FormattedMessage
+                          defaultMessage="Link your XRPay Dashboard"
+                          description="Dashboard linking header"
+                        />
+                      </Title>
+                      <Text tone="secondary" size="small">
+                        <FormattedMessage
+                          defaultMessage="Paste your Integration Key from Dashboard → Integrations → Canva to create tracked invoices."
+                          description="Link dashboard instructions"
+                        />
+                      </Text>
+                    </Rows>
+                    
+                    <FormField
+                      label={intl.formatMessage({
+                        defaultMessage: 'Integration Key',
+                        description: 'Label for dashboard api integration key'
+                      })}
+                      value={integrationKey}
+                      control={(props) => (
+                        <TextInput
+                          {...props}
+                          start={<Key size={16} />}
+                          placeholder={intl.formatMessage({
+                            defaultMessage: 'Paste Integration Key',
+                            description: 'Placeholder for integration key input'
+                          })}
+                          value={integrationKey}
+                          onChange={(val) => setIntegrationKey(val)}
+                        />
+                      )}
+                    />
+                    
+                    <Button 
+                      variant="primary"
+                      onClick={() => handleConnect()}
+                      disabled={!integrationKey || isConnecting}
+                      loading={isConnecting}
+                      stretch
+                    >
+                      {intl.formatMessage({
+                        defaultMessage: "Connect",
+                        description: "Button label to authenticate"
+                      })}
+                    </Button>
+                  </Rows>
+                ) : (
+                  <Rows spacing="2u">
+                    <div style={{ backgroundColor: '#EFF6FF', padding: '16px', borderRadius: '12px', border: '1px solid #BFDBFE' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <CheckCircle2 size={16} color="#2563EB" />
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#1E3A8A' }}>
+                            <FormattedMessage
+                              defaultMessage="Connected"
+                              description="Status indicator label"
+                            />
+                          </span>
+                        </div>
+                        <Button 
+                          variant="secondary" 
+                          onClick={handleDisconnect}
+                        >
+                          {intl.formatMessage({
+                            defaultMessage: "Disconnect",
+                            description: "Unlink button label"
+                          })}
+                        </Button>
+                      </div>
+                      
+                      <div style={{ color: '#1E40AF', fontWeight: 'bold' }}>
+                        {merchantData?.name}
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#3B82F6', backgroundColor: '#DBEAFE', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                          {merchantData?.currency}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#64748B', fontFamily: 'monospace', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '180px' }}>
+                          {merchantData?.settlementAddress}
+                        </span>
+                      </div>
+                    </div>
+
+                    <FormField
+                      label={intl.formatMessage({
+                        defaultMessage: 'Invoice Label (Optional)',
+                        description: 'Label for optional custom invoice tag'
+                      })}
+                      value={invoiceLabel}
+                      control={(props) => (
+                        <TextInput
+                          {...props}
+                          start={<FileText size={16} />}
+                          placeholder={intl.formatMessage({
+                            defaultMessage: 'Invoice label (optional)',
+                            description: 'Placeholder for optional custom invoice tag'
+                          })}
+                          value={invoiceLabel}
+                          onChange={(val) => setInvoiceLabel(val)}
+                        />
+                      )}
+                    />
+                    
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <FormField
+                          label={intl.formatMessage({
+                            defaultMessage: 'Customer Name',
+                            description: 'Label for buyer name field'
+                          })}
+                          value={customerName}
+                          control={(props) => (
+                            <TextInput
+                              {...props}
+                              start={<User size={16} />}
+                              placeholder={intl.formatMessage({
+                                defaultMessage: 'Customer name',
+                                description: 'Placeholder for customer name input'
+                              })}
+                              value={customerName}
+                              onChange={(val) => setCustomerName(val)}
+                            />
+                          )}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <FormField
+                          label={intl.formatMessage({
+                            defaultMessage: 'Email',
+                            description: 'Label for customer email address'
+                          })}
+                          value={customerEmail}
+                          control={(props) => (
+                            <TextInput
+                              {...props}
+                              start={<Mail size={16} />}
+                              placeholder={intl.formatMessage({
+                                defaultMessage: 'Email',
+                                description: 'Placeholder for customer email input'
+                              })}
+                              value={customerEmail}
+                              onChange={(val) => setCustomerEmail(val)}
+                            />
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </Rows>
+                )}
+              </div>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+
+        {/* Amount Input and Actions */}
+        {(activeTab === 'guest' || isConnected) && (
+          <Rows spacing="2u">
+            <FormField
+              label={amountLabel}
+              value={amount}
+              control={(props) => (
+                <TextInput
+                  {...props}
+                  start={<DollarSign size={16} />}
+                  placeholder={
+                    activeTab === 'connected' 
+                      ? intl.formatMessage({
+                          defaultMessage: 'Invoice amount',
+                          description: 'Placeholder for numeric invoice total'
+                        })
+                      : intl.formatMessage({
+                          defaultMessage: '100.00',
+                          description: 'Placeholder for guest amount input'
+                        })
+                  }
+                  value={amount}
+                  onChange={(val) => setAmount(val)}
+                />
+              )}
+            />
 
             {error && (
               <div style={{ fontSize: '12px', color: 'var(--color-error)', display: 'flex', alignItems: 'flex-start', gap: '6px', backgroundColor: '#FEF2F2', padding: '10px', borderRadius: '6px' }}>
-                 <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
-                 <span>{error}</span>
+                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <span>{error}</span>
               </div>
             )}
 
-            {/* Last invoice confirmation */}
             {lastInvoice && success && (
               <div style={{ fontSize: '12px', color: '#059669', display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ECFDF5', padding: '10px', borderRadius: '6px' }}>
                 <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
-                <span><strong>{lastInvoice}</strong> created and synced to your Dashboard.</span>
+                <span>
+                  <FormattedMessage
+                    defaultMessage="{invoice} created and synced to your Dashboard."
+                    description="Confirmation notice after invoice sync"
+                    values={{ invoice: <strong>{lastInvoice}</strong> }}
+                  />
+                </span>
               </div>
             )}
 
-            <button 
-              type="submit" 
+            <Button 
+              variant="primary" 
               disabled={isGenerating || !addElement || (activeTab === 'connected' && !amount)}
-              style={{ 
-                width: '100%', padding: '14px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-                backgroundColor: success ? '#F8FAFC' : '#0F172A',
-                color: success ? '#0F172A' : 'white',
-                border: success ? '1px solid #E2E8F0' : 'none',
-                transition: 'all 0.2s', marginTop: '8px',
-                opacity: (isGenerating || !addElement || (activeTab === 'connected' && !amount)) ? 0.6 : 1,
-              }}
+              loading={isGenerating}
+              onClick={handleGenerate}
+              stretch
             >
-              {isGenerating ? 'Generating...' : success ? '✓ Added to Canvas' : activeTab === 'connected' ? 'Generate Invoice QR' : 'Generate Guest QR'}
-            </button>
+              {success ? (
+                intl.formatMessage({
+                  defaultMessage: "Added to Canvas",
+                  description: "Confirmation button state"
+                })
+              ) : activeTab === 'connected' ? (
+                intl.formatMessage({
+                  defaultMessage: "Generate Invoice QR",
+                  description: "Button text for tracked invoice creation"
+                })
+              ) : (
+                intl.formatMessage({
+                  defaultMessage: "Generate Guest QR",
+                  description: "Button text for guest QR code insertion"
+                })
+              )}
+            </Button>
             
             {activeTab === 'connected' && isConnected && !success && (
-              <div style={{ fontSize: '11px', textAlign: 'center', color: '#64748B', marginTop: '-8px' }}>
-                Creates a tracked invoice in your XRPay Dashboard.
-              </div>
+              <Text tone="secondary" size="small" alignment="center">
+                <FormattedMessage
+                  defaultMessage="Creates a tracked invoice in your XRPay Dashboard."
+                  description="sync disclaimer subtext"
+                />
+              </Text>
             )}
-          </form>
+          </Rows>
         )}
-
-      </div>
-    </AppUiProvider>
+      </Rows>
+    </div>
   );
 };
